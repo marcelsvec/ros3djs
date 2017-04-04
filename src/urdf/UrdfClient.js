@@ -22,6 +22,14 @@
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
  *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
  *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
+ *
+ *   * meshPaths (optional) - the base paths to the associated Collada models that will be loaded.
+ *                            Base path for each STL is determined by the first directory in the path of the model.
+ *                            It applies only on meshes which URI starts with 'package://'
+ *                            Example:
+ *                              meshPaths = { "robot" : "media/robots/kuka/", "gripper": "media/grippers" }
+ *                              mesh "package://robot/mesh/link1.STL" in URDF will be loaded from "media/robots/kuka/link1.STL"
+ *                              mesh "package://gripper/finger.STL" in URDF will be loaded from "media/grippers/finger.STL"
  */
 ROS3D.UrdfClient = function(options) {
   var that = this;
@@ -33,6 +41,7 @@ ROS3D.UrdfClient = function(options) {
   this.rootObject = options.rootObject || new THREE.Object3D();
   this.tfPrefix = options.tfPrefix || '';
   this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
+  this.meshPaths = options.meshPaths;
 
   // get the URDF value from ROS
   var getParam = new ROSLIB.Param({
@@ -51,7 +60,8 @@ ROS3D.UrdfClient = function(options) {
       path : that.path,
       tfClient : that.tfClient,
       tfPrefix : that.tfPrefix,
-      loader : that.loader
+      loader : that.loader,
+      meshPaths: that.meshPaths
     });
     that.rootObject.add(that.urdf);
   });

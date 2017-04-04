@@ -23,6 +23,7 @@ ROS3D.Urdf = function(options) {
   var tfClient = options.tfClient;
   var tfPrefix = options.tfPrefix || '';
   var loader = options.loader || ROS3D.COLLADA_LOADER_2;
+  var meshPaths = options.meshPaths;
 
   THREE.Object3D.call(this);
 
@@ -47,6 +48,18 @@ ROS3D.Urdf = function(options) {
           var tmpIndex = uri.indexOf('package://');
           if (tmpIndex !== -1) {
             uri = uri.substr(tmpIndex + ('package://').length);
+
+            //apply meshPaths if defined
+            if (meshPaths) {
+                var firstDir = uri.substring(0, uri.indexOf('/'));
+                var filename = uri.substring(uri.lastIndexOf('/')+1);
+                if (meshPaths[firstDir]) {
+                  path = meshPaths[firstDir];
+                  uri = filename;
+                } else {
+                  path = options.path || '/';
+                }
+            }
           }
           var fileType = uri.substr(-4).toLowerCase();
 

@@ -3709,6 +3709,7 @@ ROS3D.Urdf = function(options) {
   var tfClient = options.tfClient;
   var tfPrefix = options.tfPrefix || '';
   var loader = options.loader || ROS3D.COLLADA_LOADER_2;
+  var meshPaths = options.meshPaths;
 
   THREE.Object3D.call(this);
 
@@ -3733,6 +3734,18 @@ ROS3D.Urdf = function(options) {
           var tmpIndex = uri.indexOf('package://');
           if (tmpIndex !== -1) {
             uri = uri.substr(tmpIndex + ('package://').length);
+
+            //apply meshPaths if defined
+            if (meshPaths) {
+                var firstDir = uri.substring(0, uri.indexOf('/'));
+                var filename = uri.substring(uri.lastIndexOf('/')+1);
+                if (meshPaths[firstDir]) {
+                  path = meshPaths[firstDir];
+                  uri = filename;
+                } else {
+                  path = options.path || '/';
+                }
+            }
           }
           var fileType = uri.substr(-4).toLowerCase();
 
@@ -3835,6 +3848,14 @@ ROS3D.Urdf.prototype.unsubscribeTf = function () {
  *   * tfPrefix (optional) - the TF prefix to used for multi-robots
  *   * loader (optional) - the Collada loader to use (e.g., an instance of ROS3D.COLLADA_LOADER
  *                         ROS3D.COLLADA_LOADER_2) -- defaults to ROS3D.COLLADA_LOADER_2
+ *
+ *   * meshPaths (optional) - the base paths to the associated Collada models that will be loaded.
+ *                            Base path for each STL is determined by the first directory in the path of the model.
+ *                            It applies only on meshes which URI starts with 'package://'
+ *                            Example:
+ *                              meshPaths = { "robot" : "media/robots/kuka/", "gripper": "media/grippers" }
+ *                              mesh "package://robot/mesh/link1.STL" in URDF will be loaded from "media/robots/kuka/link1.STL"
+ *                              mesh "package://gripper/finger.STL" in URDF will be loaded from "media/grippers/finger.STL"
  */
 ROS3D.UrdfClient = function(options) {
   var that = this;
@@ -3846,6 +3867,7 @@ ROS3D.UrdfClient = function(options) {
   this.rootObject = options.rootObject || new THREE.Object3D();
   this.tfPrefix = options.tfPrefix || '';
   this.loader = options.loader || ROS3D.COLLADA_LOADER_2;
+  this.meshPaths = options.meshPaths;
 
   // get the URDF value from ROS
   var getParam = new ROSLIB.Param({
@@ -3864,245 +3886,11 @@ ROS3D.UrdfClient = function(options) {
       path : that.path,
       tfClient : that.tfClient,
       tfPrefix : that.tfPrefix,
-      loader : that.loader
+      loader : that.loader,
+      meshPaths: that.meshPaths
     });
     that.rootObject.add(that.urdf);
   });
-};
-
-/**
- * @author Jihoon Lee - jihoonlee.in@gmail.com
- * @author Russell Toris - rctoris@wpi.edu
- */
-
-/**
- * A SceneNode can be used to keep track of a 3D object with respect to a ROS frame within a scene.
- *
- * @constructor
- * @param options - object with following keys:
- *
- *  * tfClient - a handle to the TF client
- *  * frameID - the frame ID this object belongs to
- *  * pose (optional) - the pose associated with this object
- *  * object - the THREE 3D object to be rendered
- */
-ROS3D.SceneNode = function(options) {
-  options = options || {};
-  var that = this;
-  this.tfClient = options.tfClient;
-  this.frameID = options.frameID;
-  var object = options.object;
-  this.pose = options.pose || new ROSLIB.Pose();
-  THREE.Object3D.call(this);
-
-  // Do not render this object until we receive a TF update
-  this.visible = false;
-
-  // add the model
-  this.add(object);
-
-  // set the inital pose
-  this.updatePose(this.pose);
-
-  // save the TF handler so we can remove it later
-  this.tfUpdate = function(msg) {
-
-    // apply the transform
-    var tf = new ROSLIB.Transform(msg);
-    var poseTransformed = new ROSLIB.Pose(that.pose);
-    poseTransformed.applyTransform(tf);
-
-    // update the world
-    that.updatePose(poseTransformed);
-    that.visible = true;
-  };
-
-  // listen for TF updates
-  this.tfClient.subscribe(this.frameID, this.tfUpdate);
-};
-ROS3D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
-
-/**
- * Set the pose of the associated model.
- *
- * @param pose - the pose to update with
- */
-ROS3D.SceneNode.prototype.updatePose = function(pose) {
-  this.position.set( pose.position.x, pose.position.y, pose.position.z );
-  this.quaternion.set(pose.orientation.x, pose.orientation.y,
-      pose.orientation.z, pose.orientation.w);
-  this.updateMatrixWorld(true);
-};
-
-ROS3D.SceneNode.prototype.unsubscribeTf = function() {
-  this.tfClient.unsubscribe(this.frameID, this.tfUpdate);
-};
-
-/**
- * @author David Gossow - dgossow@willowgarage.com
- * @author Russell Toris - rctoris@wpi.edu
- * @author Jihoon Lee - jihoonlee.in@gmail.com
- */
-
-/**
- * A Viewer can be used to render an interactive 3D scene to a HTML5 canvas.
- *
- * @constructor
- * @param options - object with following keys:
- *
- *  * divID - the ID of the div to place the viewer in
- *  * width - the initial width, in pixels, of the canvas
- *  * height - the initial height, in pixels, of the canvas
- *  * background (optional) - the color to render the background, like '#efefef'
- *  * alpha (optional) - the alpha of the background
- *  * antialias (optional) - if antialiasing should be used
- *  * intensity (optional) - the lighting intensity setting to use
- *  * cameraPosition (optional) - the starting position of the camera
- */
-ROS3D.Viewer = function(options) {
-  options = options || {};
-  var divID = options.divID;
-  var width = options.width;
-  var height = options.height;
-  var background = options.background || '#111111';
-  var antialias = options.antialias;
-  var intensity = options.intensity || 0.66;
-  var near = options.near || 0.01;
-  var far = options.far || 1000;
-  var alpha = options.alpha || 1.0;
-  var cameraPosition = options.cameraPose || {
-    x : 3,
-    y : 3,
-    z : 3
-  };
-  var cameraZoomSpeed = options.cameraZoomSpeed || 0.5;
-
-  // create the canvas to render to
-  this.renderer = new THREE.WebGLRenderer({
-    antialias : antialias,
-    alpha: true
-  });
-  this.renderer.setClearColor(parseInt(background.replace('#', '0x'), 16), alpha);
-  this.renderer.sortObjects = false;
-  this.renderer.setSize(width, height);
-  this.renderer.shadowMapEnabled = false;
-  this.renderer.autoClear = false;
-
-  // create the global scene
-  this.scene = new THREE.Scene();
-
-  // create the global camera
-  this.camera = new THREE.PerspectiveCamera(40, width / height, near, far);
-  this.camera.position.x = cameraPosition.x;
-  this.camera.position.y = cameraPosition.y;
-  this.camera.position.z = cameraPosition.z;
-  // add controls to the camera
-  this.cameraControls = new ROS3D.OrbitControls({
-    scene : this.scene,
-    camera : this.camera
-  });
-  this.cameraControls.userZoomSpeed = cameraZoomSpeed;
-
-  // lights
-  this.scene.add(new THREE.AmbientLight(0x555555));
-  this.directionalLight = new THREE.DirectionalLight(0xffffff, intensity);
-  this.scene.add(this.directionalLight);
-
-  // propagates mouse events to three.js objects
-  this.selectableObjects = new THREE.Object3D();
-  this.scene.add(this.selectableObjects);
-  var mouseHandler = new ROS3D.MouseHandler({
-    renderer : this.renderer,
-    camera : this.camera,
-    rootObject : this.selectableObjects,
-    fallbackTarget : this.cameraControls
-  });
-
-  // highlights the receiver of mouse events
-  this.highlighter = new ROS3D.Highlighter({
-    mouseHandler : mouseHandler
-  });
-
-  this.stopped = true;
-  this.animationRequestId = undefined;
-
-  // add the renderer to the page
-  document.getElementById(divID).appendChild(this.renderer.domElement);
-
-  // begin the render loop
-  this.start();
-};
-
-/**
- *  Start the render loop
- */
-ROS3D.Viewer.prototype.start = function(){
-  this.stopped = false;
-  this.draw();
-};
-
-/**
- * Renders the associated scene to the viewer.
- */
-ROS3D.Viewer.prototype.draw = function(){
-  if(this.stopped){
-    // Do nothing if stopped
-    return;
-  }
-
-  // update the controls
-  this.cameraControls.update();
-
-  // put light to the top-left of the camera
-  this.directionalLight.position = this.camera.localToWorld(new THREE.Vector3(-1, 1, 0));
-  this.directionalLight.position.normalize();
-
-  // set the scene
-  this.renderer.clear(true, true, true);
-  this.renderer.render(this.scene, this.camera);
-
-  // render any mouseovers
-  this.highlighter.renderHighlight(this.renderer, this.scene, this.camera);
-
-  // draw the frame
-  this.animationRequestId = requestAnimationFrame(this.draw.bind(this));
-};
-
-/**
- *  Stop the render loop
- */
-ROS3D.Viewer.prototype.stop = function(){
-  if(!this.stopped){
-    // Stop animation render loop
-    cancelAnimationFrame(this.animationRequestId);
-  }
-  this.stopped = true;
-};
-
-/**
- * Add the given THREE Object3D to the global scene in the viewer.
- *
- * @param object - the THREE Object3D to add
- * @param selectable (optional) - if the object should be added to the selectable list
- */
-ROS3D.Viewer.prototype.addObject = function(object, selectable) {
-  if (selectable) {
-    this.selectableObjects.add(object);
-  } else {
-    this.scene.add(object);
-  }
-};
-
-/**
- * Resize 3D viewer
- *
- * @param width - new width value
- * @param height - new height value
- */
-ROS3D.Viewer.prototype.resize = function(width, height) {
-  this.camera.aspect = width / height;
-  this.camera.updateProjectionMatrix();
-  this.renderer.setSize(width, height);
 };
 
 /**
@@ -4912,3 +4700,238 @@ ROS3D.OrbitControls.prototype.update = function() {
 };
 
 THREE.EventDispatcher.prototype.apply( ROS3D.OrbitControls.prototype );
+
+/**
+ * @author Jihoon Lee - jihoonlee.in@gmail.com
+ * @author Russell Toris - rctoris@wpi.edu
+ */
+
+/**
+ * A SceneNode can be used to keep track of a 3D object with respect to a ROS frame within a scene.
+ *
+ * @constructor
+ * @param options - object with following keys:
+ *
+ *  * tfClient - a handle to the TF client
+ *  * frameID - the frame ID this object belongs to
+ *  * pose (optional) - the pose associated with this object
+ *  * object - the THREE 3D object to be rendered
+ */
+ROS3D.SceneNode = function(options) {
+  options = options || {};
+  var that = this;
+  this.tfClient = options.tfClient;
+  this.frameID = options.frameID;
+  var object = options.object;
+  this.pose = options.pose || new ROSLIB.Pose();
+  THREE.Object3D.call(this);
+
+  // Do not render this object until we receive a TF update
+  this.visible = false;
+
+  // add the model
+  this.add(object);
+
+  // set the inital pose
+  this.updatePose(this.pose);
+
+  // save the TF handler so we can remove it later
+  this.tfUpdate = function(msg) {
+
+    // apply the transform
+    var tf = new ROSLIB.Transform(msg);
+    var poseTransformed = new ROSLIB.Pose(that.pose);
+    poseTransformed.applyTransform(tf);
+
+    // update the world
+    that.updatePose(poseTransformed);
+    that.visible = true;
+  };
+
+  // listen for TF updates
+  this.tfClient.subscribe(this.frameID, this.tfUpdate);
+};
+ROS3D.SceneNode.prototype.__proto__ = THREE.Object3D.prototype;
+
+/**
+ * Set the pose of the associated model.
+ *
+ * @param pose - the pose to update with
+ */
+ROS3D.SceneNode.prototype.updatePose = function(pose) {
+  this.position.set( pose.position.x, pose.position.y, pose.position.z );
+  this.quaternion.set(pose.orientation.x, pose.orientation.y,
+      pose.orientation.z, pose.orientation.w);
+  this.updateMatrixWorld(true);
+};
+
+ROS3D.SceneNode.prototype.unsubscribeTf = function() {
+  this.tfClient.unsubscribe(this.frameID, this.tfUpdate);
+};
+
+/**
+ * @author David Gossow - dgossow@willowgarage.com
+ * @author Russell Toris - rctoris@wpi.edu
+ * @author Jihoon Lee - jihoonlee.in@gmail.com
+ */
+
+/**
+ * A Viewer can be used to render an interactive 3D scene to a HTML5 canvas.
+ *
+ * @constructor
+ * @param options - object with following keys:
+ *
+ *  * divID - the ID of the div to place the viewer in
+ *  * width - the initial width, in pixels, of the canvas
+ *  * height - the initial height, in pixels, of the canvas
+ *  * background (optional) - the color to render the background, like '#efefef'
+ *  * alpha (optional) - the alpha of the background
+ *  * antialias (optional) - if antialiasing should be used
+ *  * intensity (optional) - the lighting intensity setting to use
+ *  * cameraPosition (optional) - the starting position of the camera
+ */
+ROS3D.Viewer = function(options) {
+  options = options || {};
+  var divID = options.divID;
+  var width = options.width;
+  var height = options.height;
+  var background = options.background || '#111111';
+  var antialias = options.antialias;
+  var intensity = options.intensity || 0.66;
+  var near = options.near || 0.01;
+  var far = options.far || 1000;
+  var alpha = options.alpha || 1.0;
+  var cameraPosition = options.cameraPose || {
+    x : 3,
+    y : 3,
+    z : 3
+  };
+  var cameraZoomSpeed = options.cameraZoomSpeed || 0.5;
+
+  // create the canvas to render to
+  this.renderer = new THREE.WebGLRenderer({
+    antialias : antialias,
+    alpha: true
+  });
+  this.renderer.setClearColor(parseInt(background.replace('#', '0x'), 16), alpha);
+  this.renderer.sortObjects = false;
+  this.renderer.setSize(width, height);
+  this.renderer.shadowMapEnabled = false;
+  this.renderer.autoClear = false;
+
+  // create the global scene
+  this.scene = new THREE.Scene();
+
+  // create the global camera
+  this.camera = new THREE.PerspectiveCamera(40, width / height, near, far);
+  this.camera.position.x = cameraPosition.x;
+  this.camera.position.y = cameraPosition.y;
+  this.camera.position.z = cameraPosition.z;
+  // add controls to the camera
+  this.cameraControls = new ROS3D.OrbitControls({
+    scene : this.scene,
+    camera : this.camera
+  });
+  this.cameraControls.userZoomSpeed = cameraZoomSpeed;
+
+  // lights
+  this.scene.add(new THREE.AmbientLight(0x555555));
+  this.directionalLight = new THREE.DirectionalLight(0xffffff, intensity);
+  this.scene.add(this.directionalLight);
+
+  // propagates mouse events to three.js objects
+  this.selectableObjects = new THREE.Object3D();
+  this.scene.add(this.selectableObjects);
+  var mouseHandler = new ROS3D.MouseHandler({
+    renderer : this.renderer,
+    camera : this.camera,
+    rootObject : this.selectableObjects,
+    fallbackTarget : this.cameraControls
+  });
+
+  // highlights the receiver of mouse events
+  this.highlighter = new ROS3D.Highlighter({
+    mouseHandler : mouseHandler
+  });
+
+  this.stopped = true;
+  this.animationRequestId = undefined;
+
+  // add the renderer to the page
+  document.getElementById(divID).appendChild(this.renderer.domElement);
+
+  // begin the render loop
+  this.start();
+};
+
+/**
+ *  Start the render loop
+ */
+ROS3D.Viewer.prototype.start = function(){
+  this.stopped = false;
+  this.draw();
+};
+
+/**
+ * Renders the associated scene to the viewer.
+ */
+ROS3D.Viewer.prototype.draw = function(){
+  if(this.stopped){
+    // Do nothing if stopped
+    return;
+  }
+
+  // update the controls
+  this.cameraControls.update();
+
+  // put light to the top-left of the camera
+  this.directionalLight.position = this.camera.localToWorld(new THREE.Vector3(-1, 1, 0));
+  this.directionalLight.position.normalize();
+
+  // set the scene
+  this.renderer.clear(true, true, true);
+  this.renderer.render(this.scene, this.camera);
+
+  // render any mouseovers
+  this.highlighter.renderHighlight(this.renderer, this.scene, this.camera);
+
+  // draw the frame
+  this.animationRequestId = requestAnimationFrame(this.draw.bind(this));
+};
+
+/**
+ *  Stop the render loop
+ */
+ROS3D.Viewer.prototype.stop = function(){
+  if(!this.stopped){
+    // Stop animation render loop
+    cancelAnimationFrame(this.animationRequestId);
+  }
+  this.stopped = true;
+};
+
+/**
+ * Add the given THREE Object3D to the global scene in the viewer.
+ *
+ * @param object - the THREE Object3D to add
+ * @param selectable (optional) - if the object should be added to the selectable list
+ */
+ROS3D.Viewer.prototype.addObject = function(object, selectable) {
+  if (selectable) {
+    this.selectableObjects.add(object);
+  } else {
+    this.scene.add(object);
+  }
+};
+
+/**
+ * Resize 3D viewer
+ *
+ * @param width - new width value
+ * @param height - new height value
+ */
+ROS3D.Viewer.prototype.resize = function(width, height) {
+  this.camera.aspect = width / height;
+  this.camera.updateProjectionMatrix();
+  this.renderer.setSize(width, height);
+};
